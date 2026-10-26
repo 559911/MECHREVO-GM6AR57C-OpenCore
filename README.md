@@ -208,11 +208,12 @@ BIOS 里需要确认：
 
 - [NullMoth Systems](https://github.com/nullmoth/nvidia-macos-driver) —— NVIDIA Metal 驱动
 - [Acidanthera](https://github.com/acidanthera) —— OpenCore、Lilu、VirtualSMC、WhateverGreen、AppleALC 等
-- [zxystd](https://github.com/OpenIntelWireless) —— itlwm / AirportItlwm、IntelBluetoothFirmware
+- [zxystd](https://github.com/OpenIntelWireless) [laobamac](https://github.com/laobamac) —— itlwm / AirportItlwm、IntelBluetoothFirmware
 - [alexandred](https://github.com/VoodooI2C) —— VoodooI2C
 - [b00t0x](https://github.com/b00t0x) —— CpuTopologyRebuild
 - [laobamac](https://github.com/laobamac) —— SimpleHDA
 - [1Revenger1](https://github.com/1Revenger1) —— ECEnabler
+- ...
 
 ## 10. 更新日志
 
