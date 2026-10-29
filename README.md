@@ -123,6 +123,8 @@ YT6801 走用户态驱动：<https://github.com/MiniYv/yt6801-for-macOS>，装�
 - **独显驱动：[NullMoth](https://github.com/nullmoth)** —— nvidia-macos-driver / 1401（NVRM·NVAccel·NVMTL）；
 - [Acidanthera](https://github.com/acidanthera)：OpenCore、Lilu、VirtualSMC、AppleALC、WhateverGreen、RestrictEvents、HibernationFixup；
 - [dhinakg](https://github.com/dhinakg)：AMFIPass；[OpenIntelWireless](https://github.com/OpenIntelWireless)：AirportItlwm、IntelBluetoothFirmware；
+- [laobamac](https://github.com/laobamac) 修复 macos 15.8.2 上的 WiFi 驱动，SimpleHDA音频驱动
 - [VoodooI2C](https://github.com/VoodooI2C)、[VoodooPS2](https://github.com/acidanthera/VoodooPS2)：触控板与键盘；
 - [MiniYv](https://github.com/MiniYv/yt6801-for-macOS)：YT6801 有线网卡驱动；
 - [zzzyy678](https://github.com/zzzyy678/SMCNvidiaGPU)：SMCNvidiaGPU 传感器插件。
+- 还有好多无法一一致谢，如有遗漏请联系我。
