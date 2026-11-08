@@ -1,0 +1,7 @@
+.DS_Store
+._*
+__MACOSX/
+*.zip
+脚本/记录/
+*.bak-orig
+*.orig
