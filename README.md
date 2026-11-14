@@ -1,396 +1,133 @@
 # MECHREVO GM6AR57C · OpenCore EFI（Hybrid MUX · 核显内屏 + 无头独显）
 
-**i7-12800HX · RTX 4070 Laptop · Intel UHD 0x4688 · macOS Sequoia 15.8.2（24H232）**
+**i7-12800HX · RTX 4070 Laptop · Intel UHD 0x4688 · AX201 · macOS Sequoia 15.8.2（24H232）**
 
-发布版本：**v14 / 2026-11-08** · 对应本机 `EFI-版本/14-混合模式-核显内屏+独显-两补丁+传感器1.8.5`
+发布版本：**v16 / 2026-11-14** · 对应本机 `EFI-版本/16-混合模式-核显内屏+独显-ForbiddenItlwm无线0.5.4-beta.2`
 
-> 这份 EFI 让**内屏由核显驱动**、**独显无头常驻并承担 Metal / OpenCL 计算与 NVDEC 硬解**（BIOS 为混合模式 / MUX Hybrid）。
+> 这份 EFI 让**内屏由核显驱动**、**独显无头常驻并承担 Metal 计算与 NVDEC 硬解**（BIOS 为混合模式 / MUX Hybrid）。
 > 内屏 2560×1600、1440×900 HiDPI、亮度连续可调；熄屏唤醒不再黑屏；硬解走独显 NVDEC。
-> 本版相对此前的 11 版已全面升级：WhateverXe **0.8.0 + 2 处本地补丁**、WhateverXe Graphics **0.4.1**、
-> NullMoth NVRM **2.7.2**、SMCNvidiaGPU **1.8.5**，第 3 处本地补丁改由苹果帧缓冲驱动自带的
-> `-nodisplaysleepDC6` 承担，并通过 8 轮熄屏唤醒回归（正式判据 193 / 223 秒，零 TrainingError、零新增 panic）。
+> **v16 起无线驱动换为 ForbiddenItlwm，AirDrop 可用。**
+> 完整变更与验证数据见 [`RELEASE-NOTES-2026-11-14.md`](RELEASE-NOTES-2026-11-14.md)。
 
 ---
 
 ## 0. 先读这一段
 
 1. **三码是占位值，必须自己生成。** 发布包 `EFI/OC/config.plist` 里的
-   `SystemSerialNumber` / `MLB` / `SystemUUID` / `ROM` 已换成占位值。不换就用，iCloud、iMessage、App Store 会异常，
-   也可能与别人的机器冲突。生成方法见 **步骤 2**。
-2. **两套显卡驱动的本体都不在 EFI 里。** EFI 只负责引导、注入 kext 与内核补丁；
-   NVRM / NVRMFB / NVRMAGDC / NVAccel 与 WhateverXe Graphics 都装在 `/Library/Extensions`、`/Library/GPUBundles`，
-   属于 AuxKC。**只拷 EFI 不会有图形加速**，必须按第 3 节把系统侧装完；重装 macOS 后这些要全部重来。
-3. **补丁与版本强绑定。** 两处本地补丁、MTL 泄漏补丁、SMCNvidiaGPU 的绑定表，都是在
-   **macOS 15.8.2（24H232）+ AppleIntelTGLGraphics 16.0.0 + NVRM 2.7.2** 上验证的。
-   换系统 build、换驱动版本，都要重新验证，不能默认沿用。
-4. **boot-args 不要按单一 README 精简。** WhateverXe 与 NullMoth / 1401 对同一参数的要求**相反**，
-   详见 3.11 与第 5 节。删错参数会直接导致启动失败或 Firefox 等加固 App 崩溃。
-5. 这是社区驱动方案，仍在活跃开发，**不建议作为唯一工作系统**；请保留一份可启动的回退介质。
+   `SystemSerialNumber` / `MLB` / `SystemUUID` / `ROM` 已换成占位值。不换就用，
+   iCloud、iMessage、App Store 会异常，也可能与别人的机器冲突。机型保持 `MacBookPro16,2`。
+2. **两套显卡驱动的本体都不在 EFI 里。** NVRM / NVRMFB / NVRMAGDC / NVAccel（3.0）与
+   WhateverXe Graphics（0.4.4）、AppleIntelTGLCompat（0.8.1）都装在 `/Library/Extensions` 等系统侧目录，
+   属于 AuxKC。**只拷 EFI 不会有图形加速**；重装 macOS 后这些要全部重来。
+3. **补丁与版本强绑定。** 两处 WhateverXe 本地补丁、`SMCNvidiaGPU` 的绑定表，都是在
+   macOS **15.8.2（24H232）+ AppleIntelTGLGraphics 16.0.0 + NVRM 3.0** 上验证的。
+   换系统 build 或换驱动版本都要重新验证。
+4. **boot-args 不要按单一 README 精简。** WhateverXe 与 NullMoth / 1401 对同一参数的要求**相反**；
+   本版还包含 ForbiddenItlwm 的 17 项参数。删错参数会直接导致启动失败、Firefox 等加固 App 崩溃，
+   或 AirDrop 失效。
+5. **ForbiddenItlwm 是实验性 beta。** 上游 README 明示「experimental beta」、有 AI 参与编写，
+   可能导致内核 panic、bootloop、Wi-Fi 或蓝牙丢失。请保留一份可启动的回退介质，
+   先在 U 盘上验证再考虑长期使用。
 
 ---
 
-## 1. 哪些硬件工作，哪些不工作
-
-### 1.1 本机配置
+## 1. 硬件与工作方式
 
 | 部件 | 型号 / 标识 |
 |---|---|
 | 机型 | MECHREVO GM6AR57C（同方 GM6AR57C 模具，16 英寸） |
 | CPU | Intel Core i7-12800HX，8P+8E / 24 线程 |
-| 核显 | Intel UHD Graphics `8086:4688`（Alder Lake-HX / ADL-S 级别，32EU） |
-| 独显 | NVIDIA RTX 4070 Laptop `10de:2820`，8 GB |
-| 内存 | 16 GB DDR5-4800，单通道 |
-| 屏幕 | 2560×1600，BOE（EDID `09e5:0a1f`），eDP，面板标称 165 Hz |
-| 声卡 | Conexant SN6140（`14f1:1f87`，layout-id 15）+ SimpleHDA |
+| 核显 | Intel UHD Graphics `8086:4688`（Alder Lake-HX / ADL-S 级别） |
+| 独显 | NVIDIA RTX 4070 Laptop `10de:2820`，8 GB，`NVAccelHeadless=Yes` |
+| 内屏 | 2560×1600，EDID 标称 165 Hz，实际 60 Hz；1440×900 HiDPI（系统侧 override） |
 | 无线 / 蓝牙 | Intel AX201 CNVi（`8086:7af0`）/ `8087:0026` |
-| 有线 | Motorcomm YT6801（`1f0a:6801`） |
-| 键盘 / 触控板 | PS/2 键盘 + I2C 精密触控板 |
-| 雷电 4 / USB4、SD 读卡器 | **本机没有这两个硬件** |
+| 声卡 | AppleALC（layout-id 15）+ SimpleHDA |
+| 有线网 | YT6801（DriverKit DEXT，需另装） |
 
-### 1.2 已驱动、可正常使用（✅）
+内屏走核显 `AppleIntelFramebuffer@0`；独显不接任何显示器，只做 Metal / OpenCL 计算与 NVDEC 解码。
 
-| 部件 | 状态与判据 |
-|---|---|
-| CPU 变频 | `cf-frequency-data` 存在 24 处；`hw.physicalcpu=8` / `hw.logicalcpu=24`（CpuTopologyRebuild 默认模式的正确输出） |
-| 核显内屏 | `AppleIntelFramebuffer@0` 驱动内屏，Metal 2，1536 MB 动态显存，`ADLSPanelPWMReady=Yes` |
-| 独显 | NVRM 2.7.2 + NVRMFB + NVRMAGDC + NVAccel 全部加载，`NVAccelHeadless=Yes`；2175 MHz / 20.4 W / 55 ℃ |
-| 内屏亮度 | 连续可调（实测 `24182/65403 = 37%` 中间档），不是 0 / 满亮两档；`SSDT-PNLF` 生效 |
-| 内屏 HiDPI | 渲染 2880×1800、UI「看起来像 1440×900」（系统侧 override，见步骤 9） |
-| Wi-Fi | AirportItlwm 2.4.0（laobamac 的 15.8.2 构建），en0 正常获取 IP |
-| 蓝牙 | IntelBluetoothFirmware 2.5.0 + IntelBTPatcher 2.5.0，State: On |
-| 有线网 | YT6801 DriverKit（DEXT）用户态驱动，需另装，见步骤 10 |
-| 声卡 | AppleALC 1.9.8（layout-id 15）+ SimpleHDA；内置扬声器、麦克风输入输出在线 |
-| USB | USBMap + 原生 XHCI；USB3 Hub、U 盘、摄像头、接收器均正常枚举 |
-| 触控板 / 键盘 | VoodooI2C 2.9.1 + VoodooI2CHID + VoodooInput + VoodooPS2 + BrightnessKeys 全部加载 |
-| 电池 | SMCBatteryManager 1.3.8，电量 / AC 状态正常 |
-| 传感器 | SMC 共 138 键；CPU 温度 / 功耗、GPU `TG0D` 与 NVAccel 侧温度一致；SMCNvidiaGPU 1.8.5 绑定成功 |
-| 键盘背光 | Fn 组合键可用（EC 直控，系统侧无读数接口，但功能正常） |
-| 风扇温控 | 风扇由 EC 直控，自动温控正常（系统侧无转速读数接口，不等于风扇没驱动） |
+### v16 主要变化
 
-### 1.3 不工作 / 受限（❌ / ⚠️）
-
-**先区分「本机根本没有这个硬件」和「有硬件但没驱动」**，下面前两项属于前者，不是配置缺陷：
-
-| 项 | 性质 | 说明 |
+| 组件 | v14 | **v16** |
 |---|---|---|
-| 雷电 4 / USB4 | 无此硬件 | `SPThunderboltDataType` 显示 No drivers are loaded，本机没有雷电控制器 |
-| SD 读卡器 | 无此硬件 | `SPCardReaderDataType` 为空 |
-| 睡眠 / 休眠 | 主动关闭 | `SleepDisabled=1`、`pmset sleep 0`。独显唤醒后内屏不亮，故永久关闭；**不要再打开** |
-| 独显显示输出 / 显卡切换 | 设计如此 | Hybrid MUX 下内屏接核显，独显 `NVAccelHeadless=Yes` 无头常驻，不驱动任何显示器 |
-| 独显动态调频 / 空闲降频 | 驱动不支持 | 常驻 2175 MHz / 约 20.4 W。官方源码说明移动端固件按「插电 / 电池」选电源策略，本机一直插电即跑 mains policy；2.7.2 没有可写的 P-state 控制项 |
-| 165 Hz 刷新率 | 用不上 | EDID 唯一 DTD 是 2560×1600@60，Apple TGL 帧缓冲只按 DTD 建模式；混合模式下固定 60 Hz |
-| 核显 VA 硬解 | 主动禁用 | `AppleIntelTGLGraphicsVADriver.bundle.disabled`。AppleGVA 像素转换会崩，核显 VA 真实播放必崩 |
-| 独显 NVENC 硬编码 | Ada 规则 | `nvrm610.conf` 设了 `NVMTL_NO_NVENC=1` / `NVMTL_NO_NVENC_HEVC=1`；只有解码，没有编码 |
-| 核显 Metal 3 | 上限 Metal 2 | 本次实测 `SPDisplaysDataType` 对两块 GPU 均报 Metal 2 |
-| NVIDIA HDMI/DP 音频 | 未装驱动 | `10de:22bd` 显示 Driver Installed: No；日常音频走 AppleALC，不受影响 |
-| 风扇转速读数 | EC 直控 | `F0Ac`/`F1Ac` 无接口；1.8.5 无条件注册的 `F2Ac`/`F3Ac` 恒显示 0 转，属显示噪音 |
-| 摄像头 | 待实测 | 能枚举 Chicony UVC（`04f2:b78a`）与连续互通相机，TCC.db 已有 App 授权；能否在会议 App 稳定出帧未实测，**不要断言已损坏** |
-| 外接 DP / USB-C 重连 | 上游已知 | WhateverXe 官方列为已知问题（第 5 节逐字引用） |
-| App Store 视频 / FairPlay / Safari 掉帧 | 上游已知 | 官方明确列为限制 |
-| 长时间无人值守的熄屏抖动 | 未专门验证 | 保持 `displaysleep` 关闭最稳妥 |
+| Wi-Fi | `AirportItlwm.kext` 2.4.0 | **`ForbiddenItlwm.kext` 0.5.4-beta.2（Sequoia）** |
+| 蓝牙广播 | `IntelBTPatcher.kext` 2.5.0 | **`BTLEAdvFixup.kext` 0.9.1（Sequoia）** |
+| WhateverXe | 0.8.0 + 2 补丁（`5dbfbbbf…`） | **0.8.2 + 2 补丁**（`1e893782…`） |
+| WhateverXe Graphics | 0.4.1（需打 MTL 泄漏补丁） | **0.4.4**（上游已修，**不再需要二进制补丁**） |
+| NullMoth NVRM | 2.7.2 | **3.0** |
+| SMCNvidiaGPU | 1.8.5（`794e8d06…`） | **2.1**（`97ef7b24…`，绑 NVRM 3.0） |
+| `Kernel > Add` | 33 项 | **30 项**（28 启用 / 2 禁用） |
+| EFI 文件数 / 体积 | 209 / 44,630,597 B | **205 / 44,154,059 B** |
+
+删掉的 3 个长期禁用 kext：`IntelBTPatcher`（被 BTLEAdvFixup 接管）、`WhateverGreen`
+（与 WhateverXe 互斥，功能全属 AMD/NVIDIA/Intel HD 补丁）、`FeatureUnlock`（本机机型原生支持）。
+保留 `HibernationFixup`、`RTCMemoryFixup` 两个禁用备用项。
 
 ---
 
-## 2. 实现了哪些功能，没实现哪些功能
+## 2. 快速开始
 
-### 2.1 已实现
+1. **生成并填入三码**（`SystemSerialNumber` / `MLB` / `SystemUUID` / `ROM`），机型不要改。
+2. **把 `EFI/` 放到引导介质**，先只引导一次，确认 kext 正常注入：
+   ```bash
+   kmutil showloaded | grep -iE 'whateverxe|forbiddenitlwm|btleadv'
+   ```
+   应当看到 `WhateverXe`、`org.forbiddenitlwm.ForbiddenItlwm`、`org.forbiddenitlwm.BTLEAdvFixup`，
+   且**不应**看到 `AirportItlwm`、`IntelBTPatcher`。
+3. **装系统侧驱动**：NullMoth NVRM 3.0（`/Library/Extensions`，重建 AuxKC）、
+   WhateverXe Graphics 0.4.4、`AppleIntelTGLCompat` 0.8.1。
+   - 0.4.4 的 `0x7ed87` 出厂即 `90 90`，**不再需要打 MTL 泄漏补丁或重签**。
+   - `AppleIntelTGLGraphicsVADriver.bundle` 仍需保持 `.disabled`；装 pkg 前先删掉旧的
+     `.disabled`，否则 `<relocate/>` 会把新载荷塞进旧目录。
+4. **核对两处 WhateverXe 本地补丁与传感器绑定**：
+   ```bash
+   shasum -a 256 EFI/OC/Kexts/WhateverXe.kext/Contents/MacOS/WhateverXe
+   # 1e8937825ec01993394488394626f860b81a9d823b7e2dc6775b4f739c1a5c60
+   sysctl kern.nvgpustate   # 成功终态：polling mask 0xff / 500 ms
+   ```
+   两处补丁（上游 0.8.2 仍未修）：ADL-S 背光去 FUSE bit24 门禁、
+   唤醒黑屏的面板供电 no-op。详见 `文档/本地补丁说明.md`。
+5. **装 HiDPI override**、跑一遍 `脚本/4-重启后自检.command`，然后验证 AirDrop。
 
-- **U 盘 OpenCore 引导 macOS 15.8.2**，Heikintosh 深色主题，保留关机 / 重启按钮，隐藏 `REL-` 版本号。
-- **双显卡共存**：核显负责内屏与桌面，独显无头提供 Metal / OpenCL 计算与 NVDEC 解码；
-  `IntelAccelerator` 与 `NVAccel` / `NVMTLDevice` 两个 IOAccelerator 都在，默认走核显。
-- **内屏完整显示链**：2560×1600 原生时序、1440×900 HiDPI、亮度滑块与亮度键连续可调、
-  `SSDT-PNLF` 生效。
-- **熄屏唤醒稳定**：8 轮熄屏唤醒回归通过（正式判据两轮连续熄屏 193 / 223 秒），
-  零 `TrainingError`、唤醒后 `IODisplayWrangler=4`、面板供电回 `02`、零新增 panic。
-- **硬解可用**：VideoToolbox 自动选独显 NVDEC，H.264 1080p ≈168 fps、HEVC 4K ≈118–132 fps，零崩溃。
-- **传感器 / 监控**：CPU 与 GPU 温度、功耗、电池、CPU 变频，SMC 键与驱动侧读数一致。
-- **常规外设**：Wi-Fi、蓝牙、有线网（另装 DEXT）、音频、USB、触控板、键盘、键盘背光。
-- **内核稳定**：连续使用无新增 panic、无 GPU Reset、无 link training 报错。
-
-### 2.2 未实现 / 明确不做
-
-| 功能 | 状态 |
-|---|---|
-| 系统睡眠 / 休眠 / 合盖睡眠 | 永久关闭，无计划开启 |
-| 独显直连内屏（MUX Discrete） | 不支持，本机是 Hybrid |
-| 独显按负载动态升降频 / 空闲降功耗 | 驱动层不支持，需上游实现 |
-| 内屏 165 Hz | EDID 限制，不做 EDID 注入 |
-| 核显 VA 硬解 / 核显像素转换 | 主动禁用，硬解统一走 NVDEC |
-| NVENC 硬编码 | Ada 规则关闭 |
-| 核显 Metal 3 | 驱动上限 Metal 2 |
-| 风扇转速读数 | EC 直控，无 SMC 接口 |
-| FairPlay / App Store 受保护视频 | 上游明确不支持 |
-| 雷电 / SD 读卡器 | 本机无硬件 |
-
-### 2.3 为达到上述功能付出的代价（必须知情）
-
-| 项 | 说明 |
-|---|---|
-| 内屏亮度依赖本地补丁 | 本机 `FUSE(0x42000) = 0x8C000000`，bit24 = 0；上游 0.8.0 仍要求 `fuse & 0x01000000`，不去掉就只有 0 / 满亮 |
-| 熄屏唤醒靠绕过而非根治 | 原生 `hwSetPanelPower(0)` 会切断 eDP/AUX 供电，本机第三方面板重训必失败；补丁把非上电状态改成 no-op |
-| MTL 命令缓冲泄漏补丁必须常驻 | 上游 0.4.1 仍未修；不打则 Chromium 32 GB 池约 30 分钟吃满，GPU 进程 SIGTRAP |
-| 核显 VA 必须保持禁用 | 否则 AppleGVA 像素转换崩溃 |
-| 独显常驻 20 W | 无法动态关闭，属官方电源策略设计 |
-| 显卡驱动在 `/Library` | 不在 EFI，重装系统要重装并重打所有系统侧补丁 |
+系统侧的完整分步说明（v14 时期撰写，版本号请以本页与发布说明为准）见
+`文档/安装指南-v14-历史.md`。
 
 ---
 
-## 3. 装完 EFI 之后，还必须做什么（逐步操作）
+## 3. 无线与 AirDrop
 
-> 目标：**一台同机型、装好 macOS 15.8.2（24H232）的机器**，按下面顺序做完，就能得到第 1、2 节列出的全部功能。
-> 每一步都写了「做什么 / 期望结果 / 出错怎么办」。**不要跳步**。
+`ForbiddenItlwm` 是 `AirportItlwm` 的分支，加入 AWDL 让 macOS 自己的 Wi-Fi 栈能在 Intel 网卡上跑
+AirDrop。官方 `docs/INSTALL.md` 明确点名 `24H232 (15.8.2) run those verified kernels`，
+所以必须使用 **Sequoia** 构建；Tahoe / Sonoma 构建在本机不能启动。
 
-### 步骤 0 · 前置检查与准备
+两个 kext 的 `IOClass` 都叫 `AirportItlwm`、`IOPCIMatch` 完全相同，**绝不能共存**。
+`IntelBTPatcher` 与 `BTLEAdvFixup` 钩同一函数，两者同钩会让 Lilu panic，故前者必须不加载。
 
-| 检查项 | 要求 |
+### 运行时判据
+
+```bash
+ioreg -l -w0 | grep -E '"ItlwmAWDL(InterfaceBuild|BuildCheck)"|"ITLAWDLCoex(Added|Channel|CountryLearned)"'
+ioreg -l -w0 -d1 | grep '"BTLEAdvHookRouted'
+```
+
+| 键 | 期望 |
 |---|---|
-| 机型 | MECHREVO GM6AR57C，i7-12800HX + RTX 4070 Laptop + 2560×1600 内屏 |
-| 系统 | macOS **15.8.2（24H232）**；别的 build 不要直接套用补丁 |
-| BIOS 显卡模式 | **混合模式 / Hybrid / Optimus**，不能设成 Discrete / dGPU |
-| BIOS 其余项 | Above 4G Decoding = On、CSM = Off、Secure Boot = Off、DVMT Pre-Allocated = 96 MB（若可设） |
-| 回退介质 | 先准备一份可启动的原 EFI 备份；本机做法是 U 盘上留 `EFI-备份-*`，需要时在 Windows 下改名 |
-| 下载 | 1401 安装器 / NVRM 2.7.2、WhateverXe Graphics 0.4.1 pkg、GenSMBIOS、YT6801 DEXT（链接见各步骤） |
+| `ItlwmAWDLInterfaceBuild` | `forbidden-0.5.4-beta.2-sequoia` |
+| `ItlwmAWDLBuildCheck` | `verified` |
+| `ITLAWDLCoexAdded` / `CountryLearned` | `Yes` / `Yes` |
+| `ITLAWDLCoexTxSubmitErrors` | `0` |
+| `BTLEAdvHookRouted` | `1` |
+| `awdl0` | 接口存在 |
+| `ITLAWDLCoexChannel` | 与 Wi-Fi 当前信道一致（本版去掉了 `-itlawdlcoexmulti`） |
 
-> **本项目的硬规矩**：EFI 只在外接 U 盘上改，内置硬盘的 EFI 分区（Windows 的 ESP）只读、不挂载、不改名、不删除。
-> 推荐照此办理——用 U 盘引导 macOS，把 U 盘整盘先复制一份留底。
+**关于 149 信道**：中国把 149–161 标为 passive，驱动不能主动开，必须先听到该频段的 beacon。
+附近只有 36/40/48 时，`ITLAWDLCoexBeaconHints = 0`，早期配置会卡在 channel 6 而极慢。
+按官方 `TROUBLESHOOTING.md` 去掉 `-itlawdlcoexmulti` 后，监听器跟随 Wi-Fi 自身信道，
+AirDrop 可用；**把路由器 5 GHz 主信道改成 149（80 MHz）可达最佳速度**，改完等一分钟即可，
+不需要再改 EFI。
 
-### 步骤 1 · 放置 EFI 并核对
-
-把发布包里的 `EFI/` **整个目录**拷到引导介质（本机是 U 盘 `/Volumes/1401`；你自己的挂载点用
-`ls /Volumes` 查，命令里的路径要相应替换）。目标目录已存在时用 `rsync`，
-不要用 `cp -R` / `mv`，否则会嵌套成 `EFI/EFI`：
-
-```bash
-rsync -a --no-perms --no-owner --no-group "EFI/" "/Volumes/1401/EFI/"
-
-# 核对文件数与 config
-find /Volumes/1401/EFI -type f | wc -l          # 应为 209
-shasum -a 256 /Volumes/1401/EFI/OC/config.plist # 见 文档/校验值.md（脱敏版 a8208ca6…）
-plutil -lint /Volumes/1401/EFI/OC/config.plist  # OK
-```
-
-`EFI/BOOT/` + `EFI/OC/` 共 209 个文件、44,630,597 字节；除 `config.plist` 里 4 处三码被换成占位值外，
-其余 208 个文件与本机 14 版逐字节相同。目录里的 `.contentFlavour` / `.contentVisibility` 是 macOS 在 FAT 卷上生成的元数据，无害。
-
-### 步骤 2 · 生成并填入自己的三码（必做）
-
-1. 下载 [GenSMBIOS](https://github.com/corpnewt/GenSMBIOS)，生成一套 **`MacBookPro16,2`** 的三码。
-2. 用 OpenCore Configurator / PlistBuddy / 文本编辑器，把生成值填进 `EFI/OC/config.plist` 的
-   `PlatformInfo > Generic` 四个字段：
-
-| 字段 | 发布包里的占位值 | 要填什么 |
-|---|---|---|
-| `SystemSerialNumber` | `C02XXXXXXXXX` | 自己生成的序列号 |
-| `MLB` | `XXXXXXXXXXXXXXXXX` | 自己生成的主板序列号 |
-| `SystemUUID` | `00000000-0000-0000-0000-000000000000` | 自己生成的 UUID |
-| `ROM` | 6 个 `00` 字节 | 自己的 MAC 地址 6 字节，或全 0 |
-
-3. `SystemProductName` 保持 `MacBookPro16,2`，`UpdateSMBIOSMode` 保持 `Custom`。
-4. 核对：`plutil -lint EFI/OC/config.plist` 输出 OK；**不要**把这套占位值直接用于联网登录 Apple 服务。
-
-### 步骤 3 · 第一次启动：只引导，先确认 kext 注入
-
-用这份 EFI 启动一次 macOS（此时还没装系统侧驱动，图形加速不完整是正常的），然后：
-
-```bash
-kmutil showloaded | grep -i whateverxe          # 应能看到 WhateverXe
-shasum -a 256 /Volumes/1401/EFI/OC/Kexts/WhateverXe.kext/Contents/MacOS/WhateverXe | cut -c1-8
-# 应为 5dbfbbbf（0.8.0 + 2 处本地补丁）
-```
-
-如果 `WhateverXe` 没出现，检查 `config.plist` 的 `Kernel > Add` 顺序（Lilu 在前、WhateverXe 在后）与 `AMFIPass`。
-发布包 EFI 里已经是 **AMFIPass 1.4.1 Mod**，不要再装上游原版，两者不能同时加载。
-
-### 步骤 4 · 安装独显驱动（NullMoth / 1401，官方）
-
-- 项目：<https://github.com/nullmoth/nvidia-macos-driver>　安装器：<https://github.com/nullmoth/1401>
-- 版本：**NVRM 2.7.2**（NVRM / NVAccel / NVRMFB / NVRMAGDC / NVMTL），装到 `/Library/Extensions` 并重建 AuxKC。
-- 装完到「系统设置 → 隐私与安全性」允许系统扩展，然后**重启**。
-- 这份 EFI 已包含它需要的 `csr-active-config=0xA43` 与 `nvfb=1 nvaccel=1 …` 全套参数；
-  `Kernel > Block` 里的 `com.apple.iokit.IONDRVSupport` 条目当前为**禁用**（1401 安装器改后的状态），
-  `OC/Tools/NullMothSafe.efi` 也在。
-
-⚠️ **1401 安装器会自动改写引导介质上的 `config.plist`**（boot-args、`Kernel > Block`、`Misc > Boot > HideAuxiliary`），
-还会替换 `OC/Tools/NullMothSafe.efi`；它改写前会留 `config.plist.before-1401-<时间>` 备份。
-所以装完必须重新核对：
-
-```bash
-shasum -a 256 /Volumes/1401/EFI/OC/config.plist
-/usr/libexec/PlistBuddy -c "Print :NVRAM:Add:7C436110-AB2A-4BBB-A880-FE41995C9F82:boot-args" /Volumes/1401/EFI/OC/config.plist
-```
-
-确认 boot-args 里 `-nodisplaysleepDC6`、`-allow3d -disablegfxfirmware`、
-`nvfb=1 nvaccel=1 nvfbheads=4 -nvkmsnosmooth amfi_get_out_of_my_way=0x1 amfi=0x80 ipc_control_port_options=0`
-都还在（完整清单见 3.11）。被删掉的项从发布包 `EFI/OC/config.plist` 里逐条补回。
-
-### 步骤 5 · 安装核显驱动包（WhateverXe Graphics 0.4.1，官方）
-
-- WEX 插件：<https://github.com/b00t0x/WhateverXe>　驱动包：<https://github.com/b00t0x/WhateverXe-Graphics>
-- 下载 **WhateverXe-Graphics-0.4.1.pkg**（约 95 MB），与上游 `SHA256SUMS` 核对：
-
-```
-7f7ce3b924ad421cff0c4f30534598858474b8c9539c4b889a461bc1d5fed02c  WhateverXe-Graphics-0.4.1.pkg
-```
-
-- 安装顺序：**步骤 3 已用本 EFI 启动过一次** → 安装 pkg → 重启。
-  pkg 会把 `AppleIntelTGLGraphics*`、`AppleIntelTGLCompat`、GL/MTL/VA bundle 装进 `/Library` 并重建 AuxKC，
-  不修改 System 卷快照。
-- 0.4.1 相对 0.4.0 只改了 `AppleIntelTGLCompat`（放宽内核 build 匹配），三个图形主文件逐字节相同，
-  所以下一节的二进制补丁偏移不会漂。
-
-### 步骤 6 · 打两个用户态补丁（必做，官方包不含）
-
-**双击 `脚本/1-装完Graphics包后补丁.command`**（或在终端 `bash` 运行），按提示输入管理员密码。脚本做两件事：
-
-1. **重打 MTL 命令缓冲泄漏补丁**：`AppleIntelTGLGraphicsMTLDriver` 偏移 `0x7ed87` 的
-   `75 0d` → `90 90`，随后 `codesign -f -s - --deep` 重签整包。
-   脚本先校验 `0x7e9cb = bf10200100e839fe0100` 版本指纹，不匹配就拒绝修改。
-   **每次安装 / 升级 Graphics pkg 都要重跑一次**，因为 pkg 会覆盖这个文件。
-2. **禁用 VADriver**：把 `AppleIntelTGLGraphicsVADriver.bundle` 改名为 `.bundle.disabled`。
-   pkg 每次都会把它装回启用状态；脚本会先把旧的 `.disabled` 移去备份，避免 `<relocate/>` 造成嵌套。
-
-脚本会在 `/Users/Shared/wex-graphics-patch-backup-<时间>/` 留备份，可用 `脚本/6-还原用户态补丁.command` 还原。
-改完**整机重启**。
-
-> 为什么必须打：`-[MTLIGAccelCommandBuffer init…]` 每次提交分配 76 KB 却跳过释放，
-> 浏览器 / Electron 的 GPU 进程约 30 分钟吃满 32 GB 池后自杀；核显 VA 路径的
-> AppleGVA 像素转换在真实播放时崩溃。两者上游 0.4.1 都未修。
-
-### 步骤 7 · 确认 WhateverXe 的两处本地补丁在位
-
-发布包 `EFI/OC/Kexts/WhateverXe.kext` **已经是 0.8.0 + 2 处本地补丁的编译版**（二进制 `5dbfbbbf…`），
-`驱动/WhateverXe.kext/` 是同一份的独立副本。正常情况下这一步只需核对，不需要自己编译：
-
-```bash
-shasum -a 256 EFI/OC/Kexts/WhateverXe.kext/Contents/MacOS/WhateverXe
-# 5dbfbbbff483babcfd5ede660e1140ecc38c1e45af1b8901358d48e7925eb053
-```
-
-两处补丁（上游 0.8.0 逐条核对仍未修，也没有官方等效启动参数）：
-
-| 编号 | 补丁 | 不打会怎样 |
-|---|---|---|
-| P1 | ADL-S 内屏背光去掉 FUSE bit24 门禁 `fuse & 0x01000000`，并夹取 16 位亮度 | 亮度只有 0 / 满亮两档 |
-| P2 | `wrapPlainPanelPower` 只放行 `hwSetPanelPower(2)`，其余状态返回成功且不动硬件 | 熄屏后切断面板供电，唤醒重训失败 → 永久黑屏 |
-
-**第 3 处补丁（Doze 期间不武装 DC6/DC9）已删除**，改由 boot-arg `-nodisplaysleepDC6` 承担：
-苹果 `AppleIntelFramebufferController::start` 解析后把 `+0xC29` 置 0，`setDCState` 在
-`0x47336` / `0x4746B` 跳过 `enableHWDC6/SWDC6`。**不要恢复三补丁版**，那是倒退。
-
-⚠️ 如果以后换成上游官方原版 WhateverXe，或自己重编，请务必换回 `驱动/WhateverXe.kext/`。
-升级 WEX 到 > 0.8.0 时，0.8.0 在 `kern_xe.cpp:13782` 新增了**第三处** bit24 门禁（只服务 Display13，
-本机是死代码），**故意不改**；不要全局替换 `(fuse&0x01000000)`。
-自行编译方法见 `驱动/源码/WhateverXe-两补丁/构建说明.md`，补丁逐条见 `文档/本地补丁说明.md`。
-
-### 步骤 8 · 确认 SMCNvidiaGPU 1.8.5 与 NVRM 绑定
-
-`EFI/OC/Kexts/SMCNvidiaGPU.kext` 是 **1.8.5**（`794e8d06…`），按上游源码原样编译，
-绑定表由本机 **NVRM 2.7.2** 现场生成（driver sha `4aeb8a5e…`、anchor `0x16030`），`驱动/SMCNvidiaGPU.kext/` 是同份副本。
-
-- 判据：`sysctl kern.nvgpudiscover` 含 `used=anchor`；`sysctl kern.nvgpustate` 为
-  `polling mask 0xff / 500 ms`（**这是绑定成功终态，不是 `bound NVRM`**）；温度非 0；`kern.nvgpupower` 单位是 **mW**。
-- **与 NVRM 强绑定**：1.7 及更早的 kext 在 2.7.2 上定位不到驱动，传感器会全部为空。
-  升级 NVRM 后必须用 `驱动/源码/SMCNvidiaGPU-1.8.5/kext/build.sh` **在目标机器上重编**
-  （脚本会读取本机 `/Library/Extensions/NVRM.kext` 现取偏移与机器码签名），然后替换 EFI 里的 kext。
-- 1.8.5 无条件注册 `F2Ac` / `F3Ac`，本机 GPU 没有独立风扇，这两条恒显示 0 转，属显示噪音，不是故障。
-
-### 步骤 9 · 内屏 1440×900 HiDPI（系统侧补丁，可选但推荐）
-
-**双击 `脚本/2-安装HiDPI覆盖.command`**，输入管理员密码；脚本会备份
-`/Library/Displays/Contents/Resources/Overrides/DisplayVendorID-9e5/` 到 `/Users/Shared/`，
-再写入发布包 `工具/内屏HiDPI-1440x900/DisplayProductID-a1f`，并校验 `flags=9 + 0x00A00000` 的 2880×1800 条目。
-
-> **必须整机重启**（苹果菜单 → 重新启动）。这份 override **只在开机时被读取**，
-> 注销重登、重启 WindowServer 都无效（已实测）。
-
-生效后：`system_profiler SPDisplaysDataType` 显示 `Resolution: 2880 x 1800` / `UI Looks like: 1440 x 900`，
-面板仍跑 2560×1600 原生时序，由 Intel pipe scaler 缩小 1.125 倍输出。
-可选档位还有 1280×800 / 1600×1000 / 1680×1050，见 `工具/内屏HiDPI-1440x900/说明.md`。
-撤销：双击 `脚本/3-还原HiDPI覆盖.command`，同样要重启。
-
-### 步骤 10 · 有线网卡 YT6801（可选）
-
-YT6801 没有 macOS 原生驱动，走用户态 DriverKit（DEXT）：
-<https://github.com/MiniYv/yt6801-for-macOS>，下载 `YT6801-Installer-1.0.13.dmg`（或更新版）安装，
-到「系统设置 → 隐私与安全性」批准系统扩展后重启。
-不插线时 `en2` 显示 `10baseT / 半双工` 是空闲态，不是故障。
-
-### 步骤 11 · 这些设置不要动 / 不要加
-
-| 项 | 要求 | 原因 |
-|---|---|---|
-| `amfi=0x80`、`ipc_control_port_options=0` | **必须保留** | WEX README 说它们 unnecessary 只是**对 WEX 单方面**；1401 的 `nullmoth-setup.sh` 明确要求，`ipc_control_port_options=0` 是为避免 AMFI relaxed 时 Firefox 等加固 App 启动崩溃 |
-| `-allow3d -disablegfxfirmware` | **必须保留** | WEX 官方唯一列出的必需启动参数 |
-| `csr-active-config = 0xA43` | 保持 | WEX 要 `0x803`、1401 要 `0xA43`，两套要求不同，以驱动安装器为准 |
-| `-nodisplaysleepDC6` | **必须保留** | 替代已删除的第 3 处本地补丁 |
-| `-nopsr` | 保持 | 苹果帧缓冲驱动启动参数之一，删除前须单独 A/B 验证 |
-| `gfxrst=1` | 保持，别改成 4 | 官方脚本原文「A gfxrst the user set stays as it is」；只有检测到 WhateverGreen 时安装器才加 `gfxrst=4` |
-| `nvrmacpibl=1` | 唯一**可选**清理项 | 1401 官方说明它只给「内屏接 NVIDIA GPU（MUX Discrete/dGPU）」的机器，本机 Hybrid 内屏接核显；且官方注明默认关闭，因为「that call stopped some PCs at GPU start」。当前零故障，改前必须单独 A/B |
-| `nvfbhidpi=1` | **不要加** | 那是 NVRMFB 的 HiDPI 开关，本机独显无头，HiDPI 走核显 + `/Library/Displays` override |
-| IINA「总是使用独立显卡」 | **不要开** | 官方文案管的是 **rendering** 不是硬解；硬解已自动走 NVDEC，强开要把渲染绑到无头独显、跨 GPU 回拷 |
-| `/Library/GPUBundles/nvmtl-allow.txt` | **不要手改** | `# rung 3: everyone` / `*` / `!WindowServer` 是 1401 默认全放行策略 |
-| 睡眠 | 保持关闭 | 见 1.3 |
-| `impostor.dylib` 的 `24H32` 门禁补丁、Sequoia MMIO 校验补丁、恢复白名单补丁 | **已作废，别再打** | 上游 0.8.0 / 0.4.1 已自行处理 |
-
-### 步骤 12 · 验证（照着判据逐项对）
-
-**双击 `脚本/4-重启后自检.command`**（只读，不需要密码）。它会核对：
-
-- 系统 15.8.2 / 24H232、Graphics 0.4.1、NVRM 2.7.2；
-- config 与本次开机 boot-args 都含 `-nodisplaysleepDC6`；
-- WEX 二进制 `5dbfbbbf`、SMCNvidiaGPU 1.8.5；
-- `TGLRecoverySinglePassRequested` / `Ready`、`WhateverXePanelPowerHooked`、
-  `TGLMMIOStrongUCRouted`、`TGLAcceleratorAdmissionReady`、`ADLSPanelPWMReady` **全 Yes**；
-- `TGLWEXDozeDCGuardReady` / `TGLWEXFBStateRouted` **应当不存在**（出现即装错成旧三补丁版）；
-- 传感器 `used=anchor` + `polling mask` + 温度非 0；
-- MTLDriver `0x7ed87 = 9090`、VADriver `.disabled`；
-- 显示输出、本次开机新增 panic 数。
-
-> **判断 hook 是否生效必须看运行时 IORegistry**，不能只看源码里有这个函数。
-> 出现 `Requested=Yes / Ready=No` 说明 donor 逐字节校验没过，**立即回退**，不要继续使用。
-
-再做一次长熄屏唤醒回归：双击 **`脚本/5-熄屏唤醒回归.command`**（默认 120 / 210 / 120 三轮，
-也可 `bash 脚本/5-熄屏唤醒回归.command 120 210`）。判据：连续熄屏 ≥85 秒、零 `TrainingError`、
-唤醒后 `IODisplayWrangler=4`、面板供电回 `02`、WindowServer 活着、零新增 panic。
-**屏幕是否真的亮起仍要你亲眼确认**。记录写到 `脚本/记录/`。
-
-### 步骤 13 · 回退
-
-| 回退对象 | 做法 |
-|---|---|
-| 整份 EFI | 用事先备份的 U 盘 EFI 目录改名顶回（本机 `EFI-备份-*`，需在 Windows 下改名）；或重新拷一份旧 EFI |
-| 用户态补丁 | 双击 `脚本/6-还原用户态补丁.command`，从 `/Users/Shared/wex-graphics-patch-backup-*` 恢复并重签，然后重启 |
-| HiDPI override | 双击 `脚本/3-还原HiDPI覆盖.command`，然后重启 |
-| 图形驱动包 | 用 WhateverXe-Graphics 仓库的 `uninstall.sh` 卸载后重启；注意卸载后所有系统侧补丁都要重做 |
-| 只退到上一版配置 | 把旧版 `WhateverXe.kext` 拷回 `OC/Kexts/`，并去掉 config 里的 `-nodisplaysleepDC6` |
-
-`/Library/NullMoth/` 下的 `bootguard.sh` / `lastgood.sh` / `nullmoth-recover.sh` 是官方安全网，**不要删**。
-
-### 步骤 14 · 后续维护
-
-- **升级 / 重装 WhateverXe Graphics pkg** → 必须重跑 `脚本/1`（MTL 泄漏补丁 + VADriver 禁用），
-  再跑 `脚本/4`。升级前先做三个主文件的二进制同异比对，逐字节相同则补丁偏移不漂。
-- **升级 NVRM** → 用 `驱动/源码/SMCNvidiaGPU-1.8.5/kext/build.sh` 在本机重编传感器插件；
-  同时重新核对 1401 安装器对 config 的改写。
-- **升级 macOS 小版本** → 两处本地补丁的 donor 偏移是硬编码的，系统一变就可能
-  `Requested=Yes / Ready=No`；升级前后各跑一次 `脚本/4`。
-- **重装 macOS** → `/Library/Extensions` 的显卡栈、`/Library/GPUBundles` 的两个补丁、
-  `/Library/Displays` 的 HiDPI override 全部要重装；EFI 里的东西不受影响。
-- **上游出新版本**（WEX > 0.8.0 或 Graphics > 0.4.1）→ 逐条比对源码再决定补丁去留，不能沿用本版结论。
-
-### 故障判据速查
-
-| 现象 | 判断 | 处理 |
-|---|---|---|
-| 亮度只有 0 / 满亮 | P1 没生效 | 确认 EFI 里是 `5dbfbbbf` 那版 WEX；看 `ADLSPanelPWMReady` |
-| 熄屏后唤醒黑屏，日志 `TrainingError` / `DBUF power up timeout` | P2 或 `-nodisplaysleepDC6` 没生效 | 查 config 与本次开机 boot-args；核对两条 DC 守卫属性是否存在 |
-| `Requested=Yes / Ready=No` | donor 逐字节校验没过 | **立即回退**，通常是系统或驱动版本变了 |
-| 浏览器 GPU 进程约 30 分钟崩 | MTL 泄漏补丁没打（装 pkg 后被覆盖） | 重跑 `脚本/1` |
-| 播视频闪退 / 跨 GPU 像素转换崩 | VADriver 没禁用 | 重跑 `脚本/1` |
-| GPU 温度全 0、`waiting for NVRM` | 传感器 kext 与 NVRM 版本不配套 | 用发布包源码在本机重编 1.8.5 |
-| `kern.nvgpustate` 显示 `polling mask 0xff / 500 ms` | **正常终态** | 不要误判为未绑定 |
-| `kern.nvgpupower ≈ 20500` | 单位是 mW，约 20.5 W | 独显无头常驻，属设计 |
-| 摄像头在会议 App 无画面 | 先查 App 授权与实测出帧 | 别直接断言「驱动坏了」 |
+⚠️ **升级 macOS 前必须先不带 `-btleadv` 启动一次**（或临时禁用 `BTLEAdvFixup`），
+否则其内存补丁会让增量更新校验失败。升级后先确认新 build 在支持列表里再开回来。
 
 ---
 
@@ -398,140 +135,80 @@ YT6801 没有 macOS 原生驱动，走用户态 DriverKit（DEXT）：
 
 ```
 GitHub 发布版本/
-├── README.md                          本文件
-├── RELEASE-NOTES-2026-11-08.md        可粘贴到 GitHub Release 页面的说明
-├── 发布步骤.md                        仓库上传 / Release / 发布前检查清单
+├── README.md                            本文件
+├── RELEASE-NOTES-2026-11-14.md          GitHub Release 页面说明（v16）
+├── 发布步骤.md                          仓库上传 / Release / 发布前检查清单
 ├── .gitignore
-├── EFI/                              209 文件（仅三码脱敏，其余与 14 版逐字节一致）
+├── EFI/                                 205 文件（仅三码脱敏，其余与 16 版逐字节一致）
 ├── 脚本/
-│   ├── 1-装完Graphics包后补丁.command  MTL 泄漏补丁 + VADriver 禁用 + 重签
-│   ├── 2-安装HiDPI覆盖.command         1440x900 HiDPI（改完必须整机重启）
+│   ├── 1-装完Graphics包后补丁.command    用户态补丁（0.4.4 起 MTL 补丁已无必要）
+│   ├── 2-安装HiDPI覆盖.command          1440x900 HiDPI（改完必须整机重启）
 │   ├── 3-还原HiDPI覆盖.command
-│   ├── 4-重启后自检.command            运行时判据逐项核对（只读）
-│   ├── 5-熄屏唤醒回归.command          多轮长熄屏唤醒测试
+│   ├── 4-重启后自检.command             运行时判据逐项核对（只读）
+│   ├── 5-熄屏唤醒回归.command           多轮长熄屏唤醒测试
 │   └── 6-还原用户态补丁.command
 ├── 驱动/
-│   ├── WhateverXe.kext/               0.8.0 + 2 处本地补丁（5dbfbbbf…）
-│   ├── SMCNvidiaGPU.kext/             1.8.5（794e8d06…）
-│   └── 源码/
-│       ├── WhateverXe-两补丁/         补丁锚点脚本与构建说明
-│       └── SMCNvidiaGPU-1.8.5/        上游 v1.8.5 源码（MIT）
+│   ├── WhateverXe.kext/                 0.8.2 + 2 处本地补丁（1e893782…）
+│   ├── SMCNvidiaGPU.kext/               2.1（97ef7b24…，绑 NVRM 3.0）
+│   └── 源码/                            v14 时期的构建基线与补丁锚点脚本
 ├── 工具/
-│   ├── 内屏HiDPI-1440x900/            override 文件、生成脚本、原版备份、说明
-│   ├── smcread / smcread.c            读 SMC 键的小工具
+│   ├── 内屏HiDPI-1440x900/              override 文件、生成脚本、原版备份、说明
+│   └── smcread / smcread.c              读 SMC 键的小工具
 └── 文档/
-    ├── 校验值.md                      全包与关键文件 SHA-256、脱敏说明
-    ├── EFI文件清单-SHA256.txt         EFI 全树 209 文件逐文件哈希
-    ├── 本地补丁说明.md                两处补丁逐条、已作废项、升级注意
-    └── boot-args逐项说明.md           逐项归属与官方依据
+    ├── 校验值.md                        全包与关键文件 SHA-256、脱敏说明
+    ├── EFI文件清单-SHA256.txt           EFI 全树 205 文件逐文件哈希
+    ├── boot-args逐项说明.md              启动参数逐项归属（含 ForbiddenItlwm 17 项）
+    ├── 本地补丁说明.md                   两处补丁逐条、已作废项、升级注意
+    ├── 安装指南-v14-历史.md              v14 完整安装排障指南（版本号已过时）
+    └── 历史-RELEASE-NOTES-v14.md        v14 发布说明存档
 ```
 
-脚本均为可直接双击的 `.command`，需要管理员权限的会自己提示输入密码，并在
-`/Users/Shared/` 留备份；`4`、`5` 号脚本只读。所有脚本都不含本机绝对路径。
+---
+
+## 5. 已知限制
+
+- 睡眠 / 休眠永久关闭（独显唤醒后内屏不亮）；`HibernationFixup` 保留为禁用备用项。
+- 内屏 165 Hz 用不上：EDID 是 384 B、DisplayID Type I 写了 2560×1600@165.002 Hz，
+  但驱动只列 60 Hz、`IOFBTimingRange` 上限 720 MHz。**未实现、未验证**。
+- 核显 VA 硬解主动禁用（AppleGVA 像素转换崩）；硬解走独显 NVDEC。
+- 风扇转速无 SMC 接口（EC 直控，温控正常）；键盘背光 Fn 组合键可用。
+- 无雷电 4、无 SD 读卡器（硬件本身没有）。
+- 摄像头能枚举 Chicony UVC 且 TCC 已授权，会议 App 长时稳定性未实测，**不要断言已损坏**。
+- AirDrop 速度受 149 信道可用性限制，见第 3 节。
 
 ---
 
-## 5. 官方依据（逐字引用，区分参数归属）
+## 6. 上游与致谢
 
-涉及驱动 / kext / boot-args 的判断，一律以各项目**作者本人**的 README、CHANGELOG、安装脚本原文为准。
-以下为核对本次配置时用到的原文（英文原文照录）。
+| 项目 | 链接 |
+|---|---|
+| ForbiddenItlwm（AirDrop for Intel Wi-Fi） | <https://github.com/retropineaple/ForbiddenItlwm> |
+| itlwm / AirportItlwm | <https://github.com/OpenIntelWireless/itlwm> |
+| IntelBluetoothFirmware | <https://github.com/OpenIntelWireless/IntelBluetoothFirmware> |
+| WhateverXe / WhateverXe-Graphics | <https://github.com/b00t0x/WhateverXe> · <https://github.com/b00t0x/WhateverXe-Graphics> |
+| NullMoth nvidia-macos-driver / 1401 | <https://github.com/nullmoth/nvidia-macos-driver> · <https://github.com/nullmoth/1401> |
+| OpenCore / Lilu / VirtualSMC / BlueToolFixup / WhateverGreen | <https://github.com/acidanthera> |
+| SMCNvidiaGPU（VirtualSMC 插件） | <https://github.com/Carnations-Botanica/SMCNvidiaGPU> |
 
-**WhateverXe 0.8.0 README**（本地 0.8.0 源码树 `README.md`，第 51、55、61–67、87–111 行）：
+`ForbiddenItlwm` Wi-Fi 驱动为 GPL-2.0，`BTLEAdvFixup` 为 GPL-3.0-only；
+其余组件许可见各自仓库。发布包内保留了上游 README 与 LICENSE。
 
-> "1. Add Lilu, `WhateverXe.kext` and [AMFIPass 1.4.1 Mod](https://github.com/b00t0x/WhateverXe-Graphics/blob/main/extras/AMFIPass-v1.4.1-Mod-RELEASE.zip) to OpenCore, with WEX after Lilu. Use the WEX **RELEASE** ZIP; DEBUG is for troubleshooting."
-
-> "Use the linked **Mod** AMFIPass instead of upstream AMFIPass; do not load both. WhateverGreen and WhateverXe must not be enabled together. `amfi=0x80` and `ipc_control_port_options=0` are unnecessary."
-
-> "### Required boot arguments"
->
-> "Add to OpenCore's `boot-args`:"
->
-> `-allow3d -disablegfxfirmware`
-
-> "The common regression checks cover Metal, OpenGL, OpenCL, hardware H.264 encode/decode and HEVC decode."
-
-> "System sleep/wake support is **experimental**. Tested configurations are MiniBook X N100/U300 (MIPI DSI) on Big Sur and Tahoe with model-specific ACPI settings, using the internal display alone or up to two external displays. Other models, OS versions and prolonged DarkWake cycles remain unverified."
-
-> "DisplayPort reconnection can cause black screens or freezes. Tiger Lake USB-C reconnection is also unreliable; Alder Lake-S DP output/reconnection can be slow."
-
-> "Some image-conversion operations can crash applications; App Store video can freeze the GPU on Sequoia."
-
-> "Safari video may occasionally drop frames. FairPlay-protected playback is unsupported."
-
-> "Some connector layouts and backlight methods, MST and Thunderbolt-managed outputs are unsupported."
-
-**NullMoth / 1401 安装器 `nullmoth-setup.sh`** 第 6 行逐字：
-
-> `WANT_ARGS="nvfb=1 nvaccel=1 nvfbheads=4 -nvkmsnosmooth amfi_get_out_of_my_way=0x1 amfi=0x80 ipc_control_port_options=0"`
-
-同脚本注释说明 `ipc_control_port_options=0` 是为避免「with AMFI relaxed, Firefox and other hardened apps crash at launch on their task control port」；
-`SIP_BITS=$((0x0A43))` 对应 `csr-active-config=0xA43`；「A gfxrst the user set stays as it is」。
-**同一参数两套驱动口径相反，绝不能按 WEX 的 README 精简本机 boot-args。**
-
-**1401「Built-in screen brightness」界面文档**逐字：
-
-> "For a laptop whose built-in screen is wired to the NVIDIA GPU (MUX set to Discrete or dGPU)... **It is off by default because that call stopped some PCs at GPU start**"
-
-本机是 Hybrid MUX、内屏接核显，所以 `nvrmacpibl=1` 是唯一明确不适用本机的项（可选清理，不是必须清理）。
-
-**上游 SMCNvidiaGPU v1.8 发布说明**逐字：
-
-> "**1.7 及更早的 kext 在 2.7.2 上定位不到驱动，风扇、功耗等传感器会全部为空；升级驱动时请一并升级 kext。**"
-
-> 该说明同时写明 2.7.2 起改用 `nvDisplayPointers` 平台函数取地址，不再把内核地址写成 `phys-for-va` 属性。
-
-**IINA 官方本地化文案**逐字：
-
-> "总是使用独立显卡（如果存在）。这可以提高渲染性能，但是可能增加耗电量。"
-> "Always use the dedicated GPU for rendering (if it exists). This can improve performance but may reduce battery life."
-
-关键在 **for rendering**：管的是渲染，不是硬解；本机硬解已走 NVDEC，无需强开。
-
-**上游问题反馈渠道**（如需反馈，请自行提交）：
-`nullmoth/nvidia-macos-driver` 的 CONTRIBUTING.md 逐字写明
-"AI-written code, descriptions and bug reports are closed without review"，且 Bug 表单要求本人勾选
-「I wrote this report myself」并提供 `NM-xxxx` 的 Send logs report ID；Send logs 会上传日志，须本人执行。
-WhateverXe 侧为 `b00t0x/WhateverXe`（+ `-Graphics`），报告前需确认其表单前置条件。
-本机两处补丁对应的上游报告已存在（WEX #16 背光 / 唤醒黑屏、#47 命令缓冲泄漏），
-优先补评论，不要重复开帖。
+上游 `nullmoth/nvidia-macos-driver` 的 CONTRIBUTING.md 明确不接受 AI 代写的代码、描述与缺陷报告，
+且要求本人撰写并提供 Send logs 的 `NM-xxxx` ID；向该项目提交 Issue 请一律由本人执行。
 
 ---
 
-## 6. 校验值
+## 7. 校验
 
-发布包 `EFI/OC/config.plist`（脱敏版）SHA-256：
-
-```
-a8208ca63522008d793c0a03a21e527e179cc3a114c8abca62da668e03e0ef38
+```bash
+shasum -a 256 EFI/OC/config.plist
+plutil -lint  EFI/OC/config.plist
 ```
 
-本机自用 14 版（未脱敏）为 `aab86399…`，两者**只差 4 处三码占位值**，其余字节完全一致。
-关键二进制指纹、全包逐文件校验见 `文档/校验值.md`。
+脱敏版 config 与自用 16 版的差异**只有 4 处三码**。全包（含二进制与 zip）
+已对真实序列号 / MLB / UUID / ROM 做过扫描，零命中。逐文件哈希见
+`文档/EFI文件清单-SHA256.txt`，关键指纹见 `文档/校验值.md`。
 
----
-
-## 7. 许可与免责
-
-- 本仓库的 `config.plist`、脚本、文档可自由用于同机型参考；**三码必须自己生成**，禁止使用占位值或他人三码登录 Apple 服务。
-- 各 kext / 驱动遵循其上游许可：WhateverXe 与 WhateverXe Graphics 为 BSD-3-Clause（衍生自 WhateverGreen），
-  SMCNvidiaGPU 1.8.5 源码为 MIT，其余见各项目仓库。发布包内保留了上游 README 与 LICENSE。
-- 显卡驱动是仍在活跃开发的社区项目，**不建议作为唯一工作系统**；操作前请备份，风险自负。
-- 升级 macOS 或任一驱动后，本文结论需重新验证。
-
----
-
-## 8. 致谢
-
-- **核显驱动：[b00t0x](https://github.com/b00t0x)** —— WhateverXe 与 WhateverXe Graphics（BSD-3-Clause，衍生自 WhateverGreen），本配置的核显内屏与亮度全靠它；
-- **独显驱动：[NullMoth](https://github.com/nullmoth)** —— nvidia-macos-driver / 1401（NVRM·NVAccel·NVMTL）；
-- [Acidanthera](https://github.com/acidanthera)：OpenCore、Lilu、VirtualSMC、AppleALC、WhateverGreen、RestrictEvents、HibernationFixup；
-- [dhinakg](https://github.com/dhinakg)：AMFIPass；[OpenIntelWireless](https://github.com/OpenIntelWireless)：AirportItlwm、IntelBluetoothFirmware；
-- [laobamac](https://github.com/laobamac) 修复 macos 15.8.2 上的 WiFi 驱动，SimpleHDA音频驱动
-- [VoodooI2C](https://github.com/VoodooI2C)、[VoodooPS2](https://github.com/acidanthera/VoodooPS2)：触控板与键盘；
-- [MiniYv](https://github.com/MiniYv/yt6801-for-macOS)：YT6801 有线网卡驱动；
-- [zzzyy678](https://github.com/zzzyy678/SMCNvidiaGPU)：SMCNvidiaGPU 传感器插件。
-- 还有好多无法一一致谢，如有遗漏请联系我。
-
----
-
-*本配置为个人实机验证记录，不保证在其他机器上可用。涉及二进制修改的操作（补丁脚本）请自行评估风险，建议先做系统备份。*
+`1401` 安装器会在登录时自动改写引导介质上的 `config.plist`（boot-args、
+`Kernel > Block`、`HideAuxiliary`）并替换 `OC/Tools/NullMothSafe.efi`，
+**每次升级驱动后都要重新核对 config 指纹**。
